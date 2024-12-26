@@ -15,6 +15,8 @@ import {
   {
     @WebSocketServer()
     server: Server; // Socket.IO 서버 인스턴스
+
+    private currentTurn: string = 'player1'; // 초기 턴 설정
   
     private clients: Map<string, string> = new Map(); // 클라이언트 ID를 저장하는 맵
   
@@ -78,5 +80,20 @@ import {
     handleChangeLevel(client: Socket, payload: { level: number; direction: string; playerId: string }) {
         // 다른 클라이언트에게 브로드캐스트
         client.broadcast.emit('changeLevel', payload);
+    }
+
+    // 클라이언트에서 턴 변경 요청 처리
+    @SubscribeMessage('changeTurn')
+    handleChangeTurn(client: Socket, payload: { nextPlayerId: string }) {
+      console.log("payload: ", payload);
+      this.currentTurn = payload.nextPlayerId; // 현재 턴 업데이트
+      this.server.emit('updateTurn', { currentTurn: this.currentTurn }); // 전체 클라이언트에 브로드캐스트
+    }
+
+    // 클라이언트에서 현재 턴 조회 요청 처리
+    @SubscribeMessage('getTurn')
+    handleGetTurn(client: Socket) {
+      console.log("this.currentTurn: ", this.currentTurn)
+      client.emit('updateTurn', { currentTurn: this.currentTurn }); // 요청한 클라이언트에 턴 정보 전송
     }
   }
