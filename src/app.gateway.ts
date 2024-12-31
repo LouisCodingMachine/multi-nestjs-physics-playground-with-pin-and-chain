@@ -48,26 +48,35 @@ import {
     @SubscribeMessage('drawShape')
     handleDrawShape(client: Socket, payload: { points: Matter.Vector[]; playerId: string; customId: string }) {
         console.log("payload: ", payload)
-        client.broadcast.emit('drawShape', payload);
+        // client.broadcast.emit('drawShape', payload);
+
+        this.server.emit('drawShape', payload);
     }
 
     @SubscribeMessage('resetLevel')
     handleResetLevel(client: Socket, payload: { level: number }) {
         // 다른 클라이언트에게 브로드캐스트
         console.log("payload: ", payload)
-        client.broadcast.emit('resetLevel', payload);
+        // client.broadcast.emit('resetLevel', payload);
+
+        this.server.emit('resetLevel', payload);
     }
 
     @SubscribeMessage('erase')
     handleErase(client: Socket, payload: { customId: string; playerId: string }) {
         console.log("payload: ", payload)
-        client.broadcast.emit('erase', payload);
+        // client.broadcast.emit('erase', payload);
+
+        this.server.emit('erase', payload);
     }
 
     @SubscribeMessage('push')
     handlePush(client: Socket, payload: { force: { x: number; y: number }; playerId: string}) {
         // 다른 클라이언트에게 브로드캐스트
-        client.broadcast.emit('push', payload);
+        // client.broadcast.emit('push', payload);
+        
+        // 모든 클라이언트에게 브로드캐스트
+        this.server.emit('push', payload);
     }
     
     @SubscribeMessage('changeTool')
@@ -79,7 +88,9 @@ import {
     @SubscribeMessage('changeLevel')
     handleChangeLevel(client: Socket, payload: { level: number; direction: string; playerId: string }) {
         // 다른 클라이언트에게 브로드캐스트
-        client.broadcast.emit('changeLevel', payload);
+        // client.broadcast.emit('changeLevel', payload);
+
+        this.server.emit('changeLevel', payload);
     }
 
     // 클라이언트에서 턴 변경 요청 처리
