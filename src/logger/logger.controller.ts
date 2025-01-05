@@ -6,9 +6,9 @@ import { LogInfoDto } from './dto/log-info.dto';
 export class LoggerController {
   constructor(private readonly loggerService: LoggerService) {}
 
-  @Post('log')
-  async createLog(@Body() logInfo: LogInfoDto) {
-    await this.loggerService.appendLog(logInfo);
-    return { message: 'Log entry created successfully' };
-  }
+  // @Post('log')
+  // async createLog(@Body() logInfo: LogInfoDto) {
+  //   await this.loggerService.appendLog(logInfo);
+  //   return { message: 'Log entry created successfully' };
+  // }
 }
