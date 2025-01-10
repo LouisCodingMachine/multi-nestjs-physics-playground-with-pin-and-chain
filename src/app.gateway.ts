@@ -18,6 +18,9 @@ import { join } from 'path';
     @WebSocketServer()
     server: Server; // Socket.IO 서버 인스턴스
 
+    private nextCollisionCategory = 0x0001; // 초기 카테고리 설정
+    private nails = new Map<string, { centerX: number; centerY: number; radius: number; category: number }>(); // nail 데이터 관리
+
     private currentTurn: string = 'player1'; // 초기 턴 설정
   
     private clients: Map<string, string> = new Map(); // 클라이언트 ID를 저장하는 맵
@@ -105,12 +108,41 @@ import { join } from 'path';
     }
 
     @SubscribeMessage('drawShape')
-    async handleDrawShape(client: Socket, payload: { points: Matter.Vector[]; playerId: string; customId: string; currentLevel: number }) {
+    async handleDrawShape(client: Socket, payload: { points: Matter.Vector[]; playerId: string; customId: string; currentLevel: number; nailsInShape: Matter.Body[] }) {
         console.log("payload: ", payload)
         // client.broadcast.emit('drawShape', payload);
         
         await this.logAction(payload.playerId, 'drawShape', payload.currentLevel, payload.customId, payload.points);
         this.server.emit('drawShape', payload);
+    }
+
+    // drawPin 이벤트 처리
+    @SubscribeMessage('drawPin')
+    handleDrawPin(client: any, data: { centerX: number; centerY: number; radius: number; playerId: string; customId: string; currentLevel: number }) {
+      // 고유한 충돌 카테고리 생성
+      const collisionCategory = this.nextCollisionCategory;
+      this.nextCollisionCategory <<= 1; // 다음 카테고리로 이동
+
+      // nail 데이터 저장
+      this.nails.set(data.customId, {
+        centerX: data.centerX,
+        centerY: data.centerY,
+        radius: data.radius,
+        category: collisionCategory,
+      });
+
+      console.log(`Nail ${data.customId} created with category ${collisionCategory}`);
+
+      // 클라이언트에 브로드캐스트
+      this.server.emit('drawPin', {
+        customId: data.customId,
+        centerX: data.centerX,
+        centerY: data.centerY,
+        radius: data.radius,
+        category: collisionCategory,
+        playerId: data.playerId,
+        currentLevel: data.currentLevel,
+      });
     }
 
     @SubscribeMessage('resetLevel')
