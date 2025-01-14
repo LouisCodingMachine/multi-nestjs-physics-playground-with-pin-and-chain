@@ -18,7 +18,7 @@ import { join } from 'path';
     @WebSocketServer()
     server: Server; // Socket.IO 서버 인스턴스
 
-    private nextCollisionCategory = 0x0001; // 초기 카테고리 설정
+    private nextCollisionCategory = 0x0002; // 초기 카테고리 설정
     private nails = new Map<string, { centerX: number; centerY: number; radius: number; category: number }>(); // nail 데이터 관리
 
     private currentTurn: string = 'player1'; // 초기 턴 설정
@@ -108,8 +108,8 @@ import { join } from 'path';
     }
 
     @SubscribeMessage('drawShape')
-    async handleDrawShape(client: Socket, payload: { points: Matter.Vector[]; playerId: string; customId: string; currentLevel: number; nailsInShape: Matter.Body[] }) {
-        console.log("payload: ", payload)
+    async handleDrawShape(client: Socket, payload: { points: Matter.Vector[]; playerId: string; customId: string; currentLevel: number; collisionCategory?: number; }) {
+        console.log("payload: ", JSON.stringify(payload))
         // client.broadcast.emit('drawShape', payload);
         
         await this.logAction(payload.playerId, 'drawShape', payload.currentLevel, payload.customId, payload.points);
@@ -121,7 +121,7 @@ import { join } from 'path';
     handleDrawPin(client: any, data: { centerX: number; centerY: number; radius: number; playerId: string; customId: string; currentLevel: number }) {
       // 고유한 충돌 카테고리 생성
       const collisionCategory = this.nextCollisionCategory;
-      this.nextCollisionCategory <<= 1; // 다음 카테고리로 이동
+      this.nextCollisionCategory += 1; // 다음 카테고리로 증가
 
       // nail 데이터 저장
       this.nails.set(data.customId, {
