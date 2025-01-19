@@ -10,6 +10,62 @@ import { Server, Socket } from 'socket.io';
 import Matter from 'matter-js';
 import { createObjectCsvWriter } from 'csv-writer';
 import { join } from 'path';
+
+  // ─────────────────────────────────────────────────────────
+  // 1) CollisionCategoryPool 클래스 정의
+  // ─────────────────────────────────────────────────────────
+  class CollisionCategoryPool {
+    private available: Set<number>;
+
+    constructor(categories: number[]) {
+      // Set에 모든 카테고리를 초기화
+      this.available = new Set(categories);
+    }
+
+    /** 단순히 "다음 카테고리"를 하나 확인만 (Set에서 제거하지 않음) */
+    peek(): number | null {
+      // Set 순회 시 첫 번째 항목을 반환한다 (보장된 순서는 없지만, 일반적으로 삽입 순서)
+      for (const cat of this.available) {
+        return cat; // 여기서 remove 하지 않음
+      }
+      return null;
+    }
+
+    /**
+     * 사용 가능한 카테고리를 하나 꺼내서 반환 (Set에서 제거)
+     * 없으면 null을 반환
+     */
+    acquire(): number | null {
+      for (const cat of this.available) {
+        this.available.delete(cat);
+        return cat;
+      }
+      return null;
+    }
+
+    /**
+     * 이미 쓰고 있던 카테고리를 다시 풀에 반납 (재사용 가능)
+     */
+    release(cat: number) {
+      this.available.add(cat);
+    }
+
+    /**
+     * 모든 카테고리를 다시 초기화하고 싶다면,
+     * 필요에 맞게 함수를 추가해 재설정 가능
+     */
+    reset(categories: number[]) {
+      this.available = new Set(categories);
+    }
+
+    // 풀 내부 상태를 보기 쉽게 문자열로 만드는 헬퍼
+    getAvailableAsHexString(): string {
+      console.log("this.available: ", this.available)
+      return Array.from(this.available)
+        .map(c => '0x' + c.toString(16))
+        .join(', ');
+    }
+  }
   
   @WebSocketGateway(3001, { cors: { origin: '*' } }) // WebSocket 서버 초기화, CORS 설정
   export class AppGateway
@@ -18,10 +74,37 @@ import { join } from 'path';
     @WebSocketServer()
     server: Server; // Socket.IO 서버 인스턴스
 
-    private nextCollisionCategory = 0x0002; // 초기 카테고리 설정
-    private nails = new Map<string, { centerX: number; centerY: number; radius: number; category: number }>(); // nail 데이터 관리
+    // private nextCollisionCategory = 0x0002; // 초기 카테고리 설정
+    // 사용할 카테고리 목록 (0x0002 ~ 0x8000)
+    private categories = [
+      0x0002, 0x0004, 0x0008, 0x0010,
+      0x0020, 0x0040, 0x0080, 0x0100,
+      0x0200, 0x0400, 0x0800, 0x1000,
+      0x2000, 0x4000, 0x8000,
+    ];
+    // 카테고리 풀 생성
+    private pool = new CollisionCategoryPool(this.categories);
+    private nextGroupNumber = -1; // 초기 Group 값 설정
+    // nail 정보를 저장하는 Map (key: customId)
+    //  → category, groupNumber 등 함께 저장
+    private nails = new Map<
+      string,
+      {
+        centerX: number;
+        centerY: number;
+        radius: number;
+        category: number;
+        groupNumber: number;
+      }
+    >();
 
     private currentTurn: string = 'player1'; // 초기 턴 설정
+
+    // 1) "두 플레이어가 공유하는" 완료된 레벨 전역 세트
+    private completedLevels = new Set<number>();
+
+    // 1) 초기화 이벤트 한 번만 발동하기 위한 플래그
+    private didTriggerOnce = false;
   
     private clients: Map<string, string> = new Map(); // 클라이언트 ID를 저장하는 맵
 
@@ -35,7 +118,10 @@ import { join } from 'path';
         { id: 'object_vector', title: 'object_vector' },
         { id: 'tool', title: 'tool' },
         { id: 'direction', title: 'direction' },
-        { id: 'new_level', title: 'new_level' },
+        { id: 'group_number', title: 'group_number' },
+        { id: 'category', title: 'category' },
+        { id: 'nails_id_string', title: 'nails_id_string' },
+        { id: 'target_body_custom_id', title: 'target_body_custom_id' },
         { id: 'timestamp', title: 'timestamp' },
       ],
       append: true,
@@ -78,7 +164,7 @@ import { join } from 'path';
       client.broadcast.emit(event, payload);
     }
 
-    private async logAction(playerId: string, type: string, currentLevel: number, objectCustomId?: string, objectVector?: Matter.Vector[], tool?: string, direction?: string, newLevel?: number) {
+    private async logAction(playerId: string, type: string, currentLevel: number, objectCustomId?: string, objectVector?: Matter.Vector[], tool?: string, direction?: string, newLevel?: number, groupNumber?: number, category?: number, nailsIdString?: string, targetBodyCustomId?: string) {
       const timestamp = new Date().toISOString();
       
       // objectVector를 JSON 문자열로 변환
@@ -94,6 +180,10 @@ import { join } from 'path';
           tool: tool || '',
           direction: direction || '',
           new_level: newLevel,
+          group_number: groupNumber || '',
+          category: category || '',
+          nails_id_string: nailsIdString || '',
+          target_body_custom_id: targetBodyCustomId || '',
           timestamp,
         },
       ]);
@@ -108,20 +198,93 @@ import { join } from 'path';
     }
 
     @SubscribeMessage('drawShape')
-    async handleDrawShape(client: Socket, payload: { points: Matter.Vector[]; playerId: string; customId: string; currentLevel: number; collisionCategory?: number; }) {
+    async handleDrawShape(client: Socket, payload: { points: Matter.Vector[]; playerId: string; customId: string; currentLevel: number; nailsIdString?: string; collisionCategory?: number; groupNumber?: number }) {
         console.log("payload: ", JSON.stringify(payload))
         // client.broadcast.emit('drawShape', payload);
         
-        await this.logAction(payload.playerId, 'drawShape', payload.currentLevel, payload.customId, payload.points);
+        await this.logAction(payload.playerId, 'drawShape', payload.currentLevel, payload.customId, payload.points, undefined, undefined, undefined, payload.groupNumber, payload.collisionCategory, payload.nailsIdString);
         this.server.emit('drawShape', payload);
     }
 
     // drawPin 이벤트 처리
+    // @SubscribeMessage('drawPin')
+    // handleDrawPin(client: any, data: { centerX: number; centerY: number; radius: number; playerId: string; customId: string; currentLevel: number, nailGroupNumber, nailCategory }) {
+    //   let collisionCategory = data.nailCategory;
+    //   let groupNumber = data.nailGroupNumber;
+
+    //   if(!data.nailCategory) {
+    //     // 고유한 충돌 카테고리 생성
+    //     collisionCategory = this.nextCollisionCategory;
+    //     this.nextCollisionCategory <<= 1; // 다음 카테고리로 증가
+    //   }    
+
+    //   if(!data.nailGroupNumber) {
+    //     groupNumber = this.nextGroupNumber;
+    //     this.nextGroupNumber -= 1;
+    //   }
+
+    //   // nail 데이터 저장
+    //   this.nails.set(data.customId, {
+    //     centerX: data.centerX,
+    //     centerY: data.centerY,
+    //     radius: data.radius,
+    //     category: collisionCategory,
+    //     groupNumber: groupNumber,
+    //   });
+
+    //   console.log(`Nail ${data.customId} created with category ${collisionCategory}`);
+
+    //   // 클라이언트에 브로드캐스트
+    //   this.server.emit('drawPin', {
+    //     customId: data.customId,
+    //     centerX: data.centerX,
+    //     centerY: data.centerY,
+    //     radius: data.radius,
+    //     category: collisionCategory,
+    //     groupNumber: groupNumber,
+    //     playerId: data.playerId,
+    //     currentLevel: data.currentLevel,
+    //   });
+    // }
+    // ─────────────────────────────────────────────────────────
+  // Pin(nail) 생성
+  // ─────────────────────────────────────────────────────────
     @SubscribeMessage('drawPin')
-    handleDrawPin(client: any, data: { centerX: number; centerY: number; radius: number; playerId: string; customId: string; currentLevel: number }) {
-      // 고유한 충돌 카테고리 생성
-      const collisionCategory = this.nextCollisionCategory;
-      this.nextCollisionCategory += 1; // 다음 카테고리로 증가
+    async handleDrawPin(
+      client: Socket,
+      data: {
+        centerX: number;
+        centerY: number;
+        radius: number;
+        points: Matter.Vector[];
+        playerId: string;
+        customId: string;
+        currentLevel: number;
+        targetBodyCustomId: string;
+        nailGroupNumber?: number;
+        nailCategory?: number;
+      },
+    ) {
+      // 카테고리 (풀 사용)
+      let collisionCategory = data.nailCategory; // 만약 클라이언트에서 직접 주면 그걸 사용
+      if (!collisionCategory) {
+        // 풀에서 하나를 대여(acquire)
+        const acquired = this.pool.acquire();
+        if (acquired == null) {
+          // 카테고리가 더 이상 없으면 에러 처리 or 디폴트?
+          console.warn('No available collision categories in the pool!');
+          collisionCategory = 0x0002; // 임시 디폴트
+        } else {
+          collisionCategory = acquired;
+        }
+      }
+
+      // groupNumber (기존 로직 유지)
+      let groupNumber = data.nailGroupNumber;
+      if (!groupNumber) {
+        groupNumber = this.nextGroupNumber;
+        this.nextGroupNumber -= 1;
+      }
 
       // nail 데이터 저장
       this.nails.set(data.customId, {
@@ -129,36 +292,85 @@ import { join } from 'path';
         centerY: data.centerY,
         radius: data.radius,
         category: collisionCategory,
+        groupNumber: groupNumber,
       });
 
-      console.log(`Nail ${data.customId} created with category ${collisionCategory}`);
+      console.log("sdfsdffds")
 
-      // 클라이언트에 브로드캐스트
+      console.log(
+        `Nail ${data.customId} created with category ${collisionCategory.toString(
+          16,
+        )}`,
+      );
+      console.log("sdfsdffsd")
+
+      // 1) 풀에 현재 남아있는 카테고리 확인
+      console.log(
+        'Remaining categories after drawPin:',
+        this.pool.getAvailableAsHexString()
+      );
+
+      await this.logAction(data.playerId, 'drawPin', data.currentLevel, data.customId, data.points, undefined, undefined, undefined, groupNumber, collisionCategory, undefined, data.targetBodyCustomId);
+
+      // 모든 클라이언트에 브로드캐스트
       this.server.emit('drawPin', {
         customId: data.customId,
         centerX: data.centerX,
         centerY: data.centerY,
         radius: data.radius,
         category: collisionCategory,
+        groupNumber: groupNumber,
         playerId: data.playerId,
         currentLevel: data.currentLevel,
       });
     }
 
+    @SubscribeMessage('releaseCategory')
+    async handleReleaseCategory(client: Socket, payload: { playerId: string; currentLevel: number; category: number }) {
+        console.log("payload: ", payload)
+        if(payload.category) {
+          this.pool.release(payload.category);
+        }
+    }
+
     @SubscribeMessage('resetLevel')
     async handleResetLevel(client: Socket, payload: { playerId: string; level: number }) {
         // 다른 클라이언트에게 브로드캐스트
-        console.log("payload: ", payload)
+        console.log("payload: ", payload);
         // client.broadcast.emit('resetLevel', payload);
+        // this.nextCollisionCategory = 0x0002;
+        this.pool.reset(this.categories);
 
         await this.logAction(payload.playerId, 'resetLevel', payload.level);
         this.server.emit('resetLevel', payload);
     }
 
     @SubscribeMessage('erase')
-    async handleErase(client: Socket, payload: { customId: string; playerId: string; currentLevel: number }) {
+    async handleErase(client: Socket, payload: { customId: string; playerId: string; currentLevel: number; isRelease?: boolean }) {
         console.log("payload: ", payload)
         // client.broadcast.emit('erase', payload);
+
+        // 1) nail Map에서 customId에 해당하는 nail 조회
+        const nailData = this.nails.get(payload.customId);
+        
+        if (nailData) {
+          console.log("nailData: ", nailData);
+          if(payload.isRelease) {
+            // 2) nail이 사용 중인 category를 pool에 반납
+            this.pool.release(nailData.category);
+          }
+
+          // 3) nail Map에서 해당 nail 삭제
+          this.nails.delete(payload.customId);
+
+          console.log(`Nail [${payload.customId}] removed and category [${nailData.category.toString(16)}] released to pool`);
+        }
+
+        // 2) 풀에 현재 남아있는 카테고리 확인
+        console.log(
+          'Remaining categories after erase:',
+          this.pool.getAvailableAsHexString()
+        );
 
         await this.logAction(payload.playerId, 'erase', payload.currentLevel, payload.customId);
         this.server.emit('erase', payload);
@@ -186,8 +398,73 @@ import { join } from 'path';
         // 다른 클라이언트에게 브로드캐스트
         // client.broadcast.emit('changeLevel', payload);
 
+        // “딱 한 번만” 발생해야 하는 로직
+        if (!this.didTriggerOnce && payload.level === 6) {
+          // 1) "3, 4, 5" 중 하나라도 this.completedLevels에 들어있으면
+          const levelsToCheck = [3, 4, 5];
+          const foundAny = levelsToCheck.some(l => this.completedLevels.has(l));
+
+          if (foundAny) {
+            // 2) 3,4,5를 모두 클리어 해제 (Set에서 제거)
+            levelsToCheck.forEach(l => this.completedLevels.delete(l));
+
+            // 3) 레벨을 3으로 강제
+            payload.level = 3;
+
+            // 4) 이 로직이 다시 실행되지 않도록 플래그 설정
+            this.didTriggerOnce = true;
+
+            console.log(
+              'Triggered once → forcing level to 3, removed [3,4,5] from completedLevels'
+            );
+
+            // (선택) completedLevels가 변경되었으니 전체 클라이언트에 알림
+            this.server.emit('completedLevelsUpdated', {
+              levels: Array.from(this.completedLevels),
+            });
+            payload.currentLevel = 3;
+            this.server.emit('changeLevel', payload);
+            // TODO: 초기화 이벤트 로그
+            return ;
+          }
+        }
+
+        this.pool.reset(this.categories);
+
         await this.logAction(payload.playerId, 'changeLevel', payload.currentLevel, undefined, undefined, undefined, payload.direction, payload.level);
         this.server.emit('changeLevel', payload);
+    }
+
+    @SubscribeMessage('completeLevel')
+    async handleCompleteLevel(client: Socket, payload: { completedLevel:number; playerId: string }) {
+        await this.logAction(payload.playerId, 'completeLevel', payload.completedLevel, undefined, undefined, undefined, undefined, undefined);
+
+        // 2) 전역 Set에 해당 레벨을 추가
+        this.completedLevels.add(payload.completedLevel);
+        console.log(
+          `Player [${payload.playerId}] completed level ${payload.completedLevel}. Current completed set:`,
+          this.completedLevels
+        );
+
+        // 3) 전체 클라이언트에 브로드캐스트 (선택)
+        //    모든 클라이언트가 "이 레벨이 완료됨"을 알 수 있음
+        this.server.emit('completeLevel', payload);
+
+        // 4) 만약 "클라이언트가 자동으로 현재 completedLevels를 갱신"하도록 하려면,
+        //    아래 같이 전체 클라이언트에 "completedLevelsUpdated" 같은 이벤트로 전송해도 됨:
+        this.server.emit('completedLevelsUpdated', {
+          levels: Array.from(this.completedLevels),
+        });
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // getCompletedLevels: 현재까지 완료된 레벨 목록을 조회
+    // ─────────────────────────────────────────────────────────
+    @SubscribeMessage('getCompletedLevels')
+    handleGetCompletedLevels(client: Socket) {
+      const levelsArray = Array.from(this.completedLevels);
+      // 현재까지 클리어된 레벨을 요청자에게만 전달
+      client.emit('completedLevelsResponse', { levels: levelsArray });
     }
 
     // 클라이언트에서 턴 변경 요청 처리
@@ -204,5 +481,83 @@ import { join } from 'path';
     async handleGetTurn(client: Socket) {
       console.log("this.currentTurn: ", this.currentTurn)
       client.emit('updateTurn', { currentTurn: this.currentTurn }); // 요청한 클라이언트에 턴 정보 전송
+    }
+
+    @SubscribeMessage('registerPin')
+    handleRegisterPin(
+      client: Socket,
+      data: {
+        centerX: number;
+        centerY: number;
+        radius: number;
+        playerId: string;
+        customId: string;
+        currentLevel: number;
+        nailGroupNumber?: number;
+        nailCategory?: number;
+      },
+    ) {
+      // 카테고리 (풀 사용)
+      let collisionCategory = data.nailCategory; // 만약 클라이언트에서 직접 주면 그걸 사용
+      if (!collisionCategory) {
+        // 풀에서 하나를 대여(acquire)
+        const acquired = this.pool.acquire();
+        if (acquired == null) {
+          // 카테고리가 더 이상 없으면 에러 처리 or 디폴트?
+          console.warn('No available collision categories in the pool!');
+          collisionCategory = 0x0002; // 임시 디폴트
+        } else {
+          collisionCategory = acquired;
+        }
+      }
+
+      // groupNumber (기존 로직 유지)
+      let groupNumber = data.nailGroupNumber;
+      if (!groupNumber) {
+        groupNumber = this.nextGroupNumber;
+        this.nextGroupNumber -= 1;
+      }
+
+      // nail 데이터 저장
+      this.nails.set(data.customId, {
+        centerX: data.centerX,
+        centerY: data.centerY,
+        radius: data.radius,
+        category: collisionCategory,
+        groupNumber: groupNumber,
+      });
+
+      console.log(
+        `Nail ${data.customId} created with category ${collisionCategory.toString(
+          16,
+        )}`,
+      );
+
+      // 1) 풀에 현재 남아있는 카테고리 확인
+      console.log(
+        'Remaining categories after drawPin:',
+        this.pool.getAvailableAsHexString()
+      );
+    }
+
+    @SubscribeMessage('getNextCategory')
+    handleGetNextCategory(client: Socket, payload: { playerId: string; currentLevel: number; }) {
+      // 풀에서 '다음 카테고리'가 무엇인지 확인만 (remove X)
+      const peeked = this.pool.peek();
+      if (peeked == null) {
+        // 풀이 비어 있는 경우
+        client.emit('nextCategoryResponse', {
+          success: false,
+          message: 'No categories left in pool',
+        });
+        return;
+      }
+
+      // 풀 상태는 그대로 유지
+      console.log(`Player [${payload.playerId}] peeked next category -> 0x${peeked.toString(16)}`);
+      client.emit('nextCategoryResponse', {
+        success: true,
+        category: peeked,
+      });
     }
   }
