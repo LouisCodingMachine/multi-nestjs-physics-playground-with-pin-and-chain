@@ -100,11 +100,13 @@ import { join } from 'path';
 
     private currentTurn: string = 'player1'; // 초기 턴 설정
 
-    // 1) "두 플레이어가 공유하는" 완료된 레벨 전역 세트
+    // "두 플레이어가 공유하는" 완료된 레벨 전역 세트
     private completedLevels = new Set<number>();
 
-    // 1) 초기화 이벤트 한 번만 발동하기 위한 플래그
+    // 초기화 이벤트 한 번만 발동하기 위한 플래그
     private didTriggerOnce = false;
+
+    private lastPushTime: number = 0;
   
     private clients: Map<string, string> = new Map(); // 클라이언트 ID를 저장하는 맵
 
@@ -122,6 +124,7 @@ import { join } from 'path';
         { id: 'category', title: 'category' },
         { id: 'nails_id_string', title: 'nails_id_string' },
         { id: 'target_body_custom_id', title: 'target_body_custom_id' },
+        { id: 'pins_id_string', title: 'pins_id_string' },
         { id: 'timestamp', title: 'timestamp' },
       ],
       append: true,
@@ -164,7 +167,7 @@ import { join } from 'path';
       client.broadcast.emit(event, payload);
     }
 
-    private async logAction(playerId: string, type: string, currentLevel: number, objectCustomId?: string, objectVector?: Matter.Vector[], tool?: string, direction?: string, newLevel?: number, groupNumber?: number, category?: number, nailsIdString?: string, targetBodyCustomId?: string) {
+    private async logAction(playerId: string, type: string, currentLevel: number, objectCustomId?: string, objectVector?: Matter.Vector[], tool?: string, direction?: string, newLevel?: number, groupNumber?: number, category?: number, nailsIdString?: string, targetBodyCustomId?: string, pinsIdString?: string) {
       const timestamp = new Date().toISOString();
       
       // objectVector를 JSON 문자열로 변환
@@ -184,6 +187,7 @@ import { join } from 'path';
           category: category || '',
           nails_id_string: nailsIdString || '',
           target_body_custom_id: targetBodyCustomId || '',
+          pins_id_string: pinsIdString || '',
           timestamp,
         },
       ]);
@@ -325,6 +329,28 @@ import { join } from 'path';
       });
     }
 
+    @SubscribeMessage('createChain')
+    async handleCreateChain(
+      client: Socket,
+      payload: {
+        playerId: string,
+        customId: string,
+        pinAId: string,
+        pinBId: string,
+        stiffness: number,
+        damping: number,
+        length: number,
+        currentLevel: number,
+      }
+    ) {
+      console.log('createChain from client:', payload);
+
+      const pinsIDString = payload.pinAId + ';' + payload.pinBId;
+
+      await this.logAction(payload.playerId, 'drawChain', payload.currentLevel, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, pinsIDString);
+      this.server.emit('createChain', payload);
+    }
+
     @SubscribeMessage('releaseCategory')
     async handleReleaseCategory(client: Socket, payload: { playerId: string; currentLevel: number; category: number }) {
         console.log("payload: ", payload)
@@ -381,9 +407,22 @@ import { join } from 'path';
         // 다른 클라이언트에게 브로드캐스트
         // client.broadcast.emit('push', payload);
         
-        // 모든 클라이언트에게 브로드캐스트
-        await this.logAction(payload.playerId, payload.force.x > 0 ? 'left_push' : 'right_push', payload.currentLevel);
-        this.server.emit('push', payload);
+        const now = Date.now();
+        const COOLDOWN_MS = 6000;
+        const timeSinceLastPush = now - this.lastPushTime;
+
+        if (timeSinceLastPush >= COOLDOWN_MS) {
+          // 모든 클라이언트에게 브로드캐스트
+          await this.logAction(payload.playerId, payload.force.x > 0 ? 'left_push' : 'right_push', payload.currentLevel);
+          this.server.emit('push', payload);
+
+          this.lastPushTime = now;
+
+          // chage turn
+          this.currentTurn = payload.playerId === 'player1' ? 'player2' : 'player1'; // 현재 턴 업데이트
+          this.server.emit('updateTurn', { currentTurn: this.currentTurn }); // 전체 클라이언트에 브로드캐스트
+          return ;
+        }
     }
     
     @SubscribeMessage('changeTool')
