@@ -438,32 +438,35 @@ import { join } from 'path';
         // client.broadcast.emit('changeLevel', payload);
 
         // “딱 한 번만” 발생해야 하는 로직
-        if (!this.didTriggerOnce && payload.level === 6) {
-          // 1) "3, 4, 5" 중 하나라도 this.completedLevels에 들어있으면
-          const levelsToCheck = [3, 4, 5];
+        if (!this.didTriggerOnce && payload.level === 7) {
+          // 1) "4, 5, 6" 중 하나라도 this.completedLevels에 들어있으면
+          const levelsToCheck = [4, 5, 6];
           const foundAny = levelsToCheck.some(l => this.completedLevels.has(l));
 
           if (foundAny) {
-            // 2) 3,4,5를 모두 클리어 해제 (Set에서 제거)
+            // 2) 4, 5, 6을 모두 클리어 해제 (Set에서 제거)
             levelsToCheck.forEach(l => this.completedLevels.delete(l));
 
-            // 3) 레벨을 3으로 강제
-            payload.level = 3;
+            // 3) 레벨을 4로 강제
+            payload.level = 4;
 
             // 4) 이 로직이 다시 실행되지 않도록 플래그 설정
             this.didTriggerOnce = true;
 
             console.log(
-              'Triggered once → forcing level to 3, removed [3,4,5] from completedLevels'
+              'Triggered once → forcing level to 4, removed [4,5,6] from completedLevels'
             );
 
             // (선택) completedLevels가 변경되었으니 전체 클라이언트에 알림
             this.server.emit('completedLevelsUpdated', {
               levels: Array.from(this.completedLevels),
             });
-            payload.currentLevel = 3;
+            payload.currentLevel = 4;
             this.server.emit('changeLevel', payload);
+            
             // TODO: 초기화 이벤트 로그
+            this.logAction(payload.playerId, 'reset_event', 7, undefined, undefined, undefined, undefined, 4, undefined, undefined, undefined, undefined, undefined)
+
             return ;
           }
         }
