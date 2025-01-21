@@ -366,13 +366,14 @@ import { join } from 'path';
         // client.broadcast.emit('resetLevel', payload);
         // this.nextCollisionCategory = 0x0002;
         this.pool.reset(this.categories);
+        this.nails.clear();
 
         await this.logAction(payload.playerId, 'resetLevel', payload.level);
         this.server.emit('resetLevel', payload);
     }
 
     @SubscribeMessage('erase')
-    async handleErase(client: Socket, payload: { customId: string; playerId: string; currentLevel: number; isRelease?: boolean }) {
+    async handleErase(client: Socket, payload: { customId: string; playerId: string; currentLevel: number; isFall?: boolean }) {
         console.log("payload: ", payload)
         // client.broadcast.emit('erase', payload);
 
@@ -381,10 +382,10 @@ import { join } from 'path';
         
         if (nailData) {
           console.log("nailData: ", nailData);
-          if(payload.isRelease) {
-            // 2) nail이 사용 중인 category를 pool에 반납
-            this.pool.release(nailData.category);
-          }
+          // if(payload.isFall) {
+          //   // 2) nail이 사용 중인 category를 pool에 반납
+          //   this.pool.release(nailData.category);
+          // }
 
           // 3) nail Map에서 해당 nail 삭제
           this.nails.delete(payload.customId);
@@ -398,7 +399,12 @@ import { join } from 'path';
           this.pool.getAvailableAsHexString()
         );
 
-        await this.logAction(payload.playerId, 'erase', payload.currentLevel, payload.customId);
+        if (payload.isFall) {
+          await this.logAction(payload.playerId, 'fall', payload.currentLevel, payload.customId);
+        } else {
+          await this.logAction(payload.playerId, 'erase', payload.currentLevel, payload.customId);
+        }
+        
         this.server.emit('erase', payload);
     }
 
@@ -472,6 +478,7 @@ import { join } from 'path';
         }
 
         this.pool.reset(this.categories);
+        this.nails.clear();
 
         await this.logAction(payload.playerId, 'changeLevel', payload.currentLevel, undefined, undefined, undefined, payload.direction, payload.level);
         this.server.emit('changeLevel', payload);
@@ -539,6 +546,7 @@ import { join } from 'path';
         nailCategory?: number;
       },
     ) {
+      if(this.nails.get(data.customId)) return ;
       // 카테고리 (풀 사용)
       let collisionCategory = data.nailCategory; // 만약 클라이언트에서 직접 주면 그걸 사용
       if (!collisionCategory) {
