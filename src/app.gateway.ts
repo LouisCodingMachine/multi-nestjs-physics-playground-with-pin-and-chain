@@ -101,7 +101,7 @@ import { join } from 'path';
     private currentTurn: string = 'player1'; // 초기 턴 설정
 
     // "두 플레이어가 공유하는" 완료된 레벨 전역 세트
-    private completedLevels = new Set<number>();
+    private completedLevels = new Set<number>([1, 2, 3]);
 
     // 초기화 이벤트 한 번만 발동하기 위한 플래그
     private didTriggerOnce = false;
