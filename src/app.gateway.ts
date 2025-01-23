@@ -487,8 +487,8 @@ import { join } from 'path';
     @SubscribeMessage('resetEvent')
     async handleResetEvent(client: Socket, payload: { currentLevel: number; level: number }) {
 
-      // 1) "4, 5, 6" 중 하나라도 this.completedLevels에 들어있으면
-      const levelsToCheck = [4, 5, 6];
+      // 1) "4, 5, 6, 7, 8, 9, 10" 중 하나라도 this.completedLevels에 들어있으면
+      const levelsToCheck = [4, 5, 6, 7, 8, 9, 10];
       const foundAny = levelsToCheck.some(l => this.completedLevels.has(l));
 
       if (foundAny) {
@@ -496,7 +496,7 @@ import { join } from 'path';
         levelsToCheck.forEach(l => this.completedLevels.delete(l));
 
         console.log(
-          `Triggered once → forcing level to ${payload.level}, removed [4,5,6] from completedLevels`
+          `Triggered once → forcing level to ${payload.level}, removed [4,5,6,7,8,9,10] from completedLevels`
         );
 
         // (선택) completedLevels가 변경되었으니 전체 클라이언트에 알림
