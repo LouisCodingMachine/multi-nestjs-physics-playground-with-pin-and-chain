@@ -513,7 +513,7 @@ import { join } from 'path';
         this.server.emit('changeLevel', changeLevelPayload);
         
         // TODO: 초기화 이벤트 로그
-        this.logAction('system', 'reset_event', undefined, undefined, undefined, undefined, undefined, payload.level, undefined, undefined, undefined, undefined, undefined);
+        this.logAction('system', 'reset_event', payload.currentLevel, undefined, undefined, undefined, undefined, payload.level, undefined, undefined, undefined, undefined, undefined);
 
         return ;
       }
