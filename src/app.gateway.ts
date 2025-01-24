@@ -120,6 +120,7 @@ import { join } from 'path';
         { id: 'object_vector', title: 'object_vector' },
         { id: 'tool', title: 'tool' },
         { id: 'direction', title: 'direction' },
+        { id: 'new_level', title: 'new_level' },
         { id: 'group_number', title: 'group_number' },
         { id: 'category', title: 'category' },
         { id: 'nails_id_string', title: 'nails_id_string' },
