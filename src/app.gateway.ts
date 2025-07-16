@@ -2,6 +2,8 @@ import {
   WebSocketGateway,
   WebSocketServer,
   SubscribeMessage,
+  MessageBody,
+  ConnectedSocket,
   OnGatewayInit,
   OnGatewayConnection,
   OnGatewayDisconnect,
@@ -195,6 +197,7 @@ import { join } from 'path';
         },
       ]);
     }
+    
       
     // 특정 메시지를 처리하는 데코레이터
     @SubscribeMessage('mouseMove') // 'mouseMove' 이벤트를 수신
@@ -353,6 +356,16 @@ import { join } from 'path';
       await this.logAction(payload.playerId, 'drawChain', payload.currentLevel, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, pinsIDString);
       this.server.emit('createChain', payload);
     }
+
+    @SubscribeMessage('changeHingePosition')
+      handleChangeHingePosition(
+        @MessageBody() data: { level: number; hingePosIndex: 0|1|2; playerId: string },
+        @ConnectedSocket() client: Socket,
+      ) {
+        // 보낸 클라이언트를 제외한 모두에게 재전파
+        client.broadcast.emit('changeHingePosition', data);
+      }
+
 
     @SubscribeMessage('releaseCategory')
     async handleReleaseCategory(client: Socket, payload: { playerId: string; currentLevel: number; category: number }) {
