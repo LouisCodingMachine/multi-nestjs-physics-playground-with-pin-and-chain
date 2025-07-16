@@ -107,6 +107,8 @@ import { join } from 'path';
     private didTriggerOnce = false;
 
     private lastPushTime: number = 0;
+
+    private pushPermanentLock = false
   
     private clients: Map<string, string> = new Map(); // 클라이언트 ID를 저장하는 맵
 
@@ -368,6 +370,8 @@ import { join } from 'path';
         // this.nextCollisionCategory = 0x0002;
         this.pool.reset(this.categories);
         this.nails.clear();
+        this.pushPermanentLock = false;
+        
 
         await this.logAction(payload.playerId, 'resetLevel', payload.level);
         this.server.emit('resetLevel', payload);
@@ -414,6 +418,12 @@ import { join } from 'path';
         // 다른 클라이언트에게 브로드캐스트
         // client.broadcast.emit('push', payload);
         
+        if(payload.currentLevel === 19 && this.pushPermanentLock) {
+          await this.logAction(payload.playerId, payload.force.x > 0 ? 'left_push_notworking' : 'right_push_notworking', payload.currentLevel);
+          console.log(payload.playerId, payload.force.x > 0 ? 'left_push_notworking' : 'right_push_notworking')
+          return ;
+        }
+
         const now = Date.now();
         const COOLDOWN_MS = 6000;
         const timeSinceLastPush = now - this.lastPushTime;
@@ -428,6 +438,10 @@ import { join } from 'path';
           // chage turn
           this.currentTurn = payload.playerId === 'player1' ? 'player2' : 'player1'; // 현재 턴 업데이트
           this.server.emit('updateTurn', { currentTurn: this.currentTurn }); // 전체 클라이언트에 브로드캐스트
+
+          if(payload.currentLevel === 19 && !this.pushPermanentLock) {
+            this.pushPermanentLock = true;
+          }
           return ;
         }
     }
@@ -480,6 +494,7 @@ import { join } from 'path';
 
         this.pool.reset(this.categories);
         this.nails.clear();
+        this.pushPermanentLock = false;
 
         await this.logAction(payload.playerId, 'changeLevel', payload.currentLevel, undefined, undefined, undefined, payload.direction, payload.level);
         this.server.emit('changeLevel', payload);
@@ -488,36 +503,37 @@ import { join } from 'path';
     @SubscribeMessage('resetEvent')
     async handleResetEvent(client: Socket, payload: { currentLevel: number; level: number }) {
 
-      // 1) "4, 5, 6, 7, 8, 9, 10" 중 하나라도 this.completedLevels에 들어있으면
-      const levelsToCheck = [4, 5, 6, 7, 8, 9, 10];
-      const foundAny = levelsToCheck.some(l => this.completedLevels.has(l));
+      // // 1) "4, 5, 6, 7, 8, 9, 10" 중 하나라도 this.completedLevels에 들어있으면
+      // const levelsToCheck = [4, 5, 6, 7, 8, 9, 10];
+      // const foundAny = levelsToCheck.some(l => this.completedLevels.has(l));
 
-      if (foundAny) {
-        // 2) 4, 5, 6을 모두 클리어 해제 (Set에서 제거)
-        levelsToCheck.forEach(l => this.completedLevels.delete(l));
+      // if (foundAny) {
+      //   // 2) 4, 5, 6을 모두 클리어 해제 (Set에서 제거)
+      //   levelsToCheck.forEach(l => this.completedLevels.delete(l));
 
-        console.log(
-          `Triggered once → forcing level to ${payload.level}, removed [4,5,6,7,8,9,10] from completedLevels`
-        );
+      //   console.log(
+      //     `Triggered once → forcing level to ${payload.level}, removed [4,5,6,7,8,9,10] from completedLevels`
+      //   );
 
-        // (선택) completedLevels가 변경되었으니 전체 클라이언트에 알림
-        this.server.emit('completedLevelsUpdated', {
-          levels: Array.from(this.completedLevels),
-        });
+      //   // (선택) completedLevels가 변경되었으니 전체 클라이언트에 알림
+      //   this.server.emit('completedLevelsUpdated', {
+      //     levels: Array.from(this.completedLevels),
+      //   });
         
-        const changeLevelPayload = {
-          level: payload.level, 
-          direction: '',
-          playerId: 'system',
-        }
+      //   const changeLevelPayload = {
+      //     level: payload.level, 
+      //     direction: '',
+      //     playerId: 'system',
+      //   }
         
-        this.server.emit('changeLevel', changeLevelPayload);
+      //   this.server.emit('changeLevel', changeLevelPayload);
         
-        // TODO: 초기화 이벤트 로그
-        this.logAction('system', 'reset_event', payload.currentLevel, undefined, undefined, undefined, undefined, payload.level, undefined, undefined, undefined, undefined, undefined);
+      //   // TODO: 초기화 이벤트 로그
+      //   this.logAction('system', 'reset_event', payload.currentLevel, undefined, undefined, undefined, undefined, payload.level, undefined, undefined, undefined, undefined, undefined);
 
-        return ;
-      }
+      //   return ;
+      // }
+      return;
     }
 
     @SubscribeMessage('completeLevel')
