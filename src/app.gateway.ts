@@ -431,7 +431,7 @@ import { join } from 'path';
         // 다른 클라이언트에게 브로드캐스트
         // client.broadcast.emit('push', payload);
         
-        if(payload.currentLevel === 19 && this.pushPermanentLock) {
+        if(payload.currentLevel === 12 && this.pushPermanentLock) {
           await this.logAction(payload.playerId, payload.force.x > 0 ? 'left_push_notworking' : 'right_push_notworking', payload.currentLevel);
           console.log(payload.playerId, payload.force.x > 0 ? 'left_push_notworking' : 'right_push_notworking')
           return ;
@@ -452,7 +452,7 @@ import { join } from 'path';
           this.currentTurn = payload.playerId === 'player1' ? 'player2' : 'player1'; // 현재 턴 업데이트
           this.server.emit('updateTurn', { currentTurn: this.currentTurn }); // 전체 클라이언트에 브로드캐스트
 
-          if(payload.currentLevel === 19 && !this.pushPermanentLock) {
+          if(payload.currentLevel === 12 && !this.pushPermanentLock) {
             this.pushPermanentLock = true;
           }
           return ;
