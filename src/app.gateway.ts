@@ -75,7 +75,7 @@ import { join } from 'path';
   {
     @WebSocketServer()
     server: Server; // Socket.IO 서버 인스턴스
-
+    private lastRectangles = new Map<number, string>();
     // private nextCollisionCategory = 0x0002; // 초기 카테고리 설정
     // 사용할 카테고리 목록 (0x0002 ~ 0x8000)
     private categories = [
@@ -208,55 +208,36 @@ import { join } from 'path';
     }
 
     @SubscribeMessage('drawShape')
-    async handleDrawShape(client: Socket, payload: { points: Matter.Vector[]; playerId: string; customId: string; currentLevel: number; nailsIdString?: string; collisionCategory?: number; groupNumber?: number }) {
-        console.log("payload: ", JSON.stringify(payload))
-        // client.broadcast.emit('drawShape', payload);
-        
-        await this.logAction(payload.playerId, 'drawShape', payload.currentLevel, payload.customId, payload.points, undefined, undefined, undefined, payload.groupNumber, payload.collisionCategory, payload.nailsIdString);
-        this.server.emit('drawShape', payload);
+    async handleDrawShape(client: Socket, payload: {
+      points: Matter.Vector[];
+      playerId: string;
+      customId: string;
+      currentLevel: number;
+      nailsIdString?: string;
+      collisionCategory?: number;
+      groupNumber?: number;
+    }) {
+      console.log("payload:", JSON.stringify(payload));
+      await this.logAction(
+        payload.playerId, 'drawShape', payload.currentLevel,
+        payload.customId, payload.points,
+        undefined, undefined, undefined,
+        payload.groupNumber, payload.collisionCategory, payload.nailsIdString);
+
+        if ([7, 8, 9, 10, 20].includes(payload.currentLevel)) {
+          const prevId = this.lastRectangles.get(payload.currentLevel);
+          if (prevId) {
+            this.server.emit('erase', {
+              customId: prevId,
+              playerId: 'system',
+              currentLevel: payload.currentLevel
+            });
+          }
+          this.lastRectangles.set(payload.currentLevel, payload.customId);
+        }
+      client.broadcast.emit('drawShape', payload);
     }
 
-    // drawPin 이벤트 처리
-    // @SubscribeMessage('drawPin')
-    // handleDrawPin(client: any, data: { centerX: number; centerY: number; radius: number; playerId: string; customId: string; currentLevel: number, nailGroupNumber, nailCategory }) {
-    //   let collisionCategory = data.nailCategory;
-    //   let groupNumber = data.nailGroupNumber;
-
-    //   if(!data.nailCategory) {
-    //     // 고유한 충돌 카테고리 생성
-    //     collisionCategory = this.nextCollisionCategory;
-    //     this.nextCollisionCategory <<= 1; // 다음 카테고리로 증가
-    //   }    
-
-    //   if(!data.nailGroupNumber) {
-    //     groupNumber = this.nextGroupNumber;
-    //     this.nextGroupNumber -= 1;
-    //   }
-
-    //   // nail 데이터 저장
-    //   this.nails.set(data.customId, {
-    //     centerX: data.centerX,
-    //     centerY: data.centerY,
-    //     radius: data.radius,
-    //     category: collisionCategory,
-    //     groupNumber: groupNumber,
-    //   });
-
-    //   console.log(`Nail ${data.customId} created with category ${collisionCategory}`);
-
-    //   // 클라이언트에 브로드캐스트
-    //   this.server.emit('drawPin', {
-    //     customId: data.customId,
-    //     centerX: data.centerX,
-    //     centerY: data.centerY,
-    //     radius: data.radius,
-    //     category: collisionCategory,
-    //     groupNumber: groupNumber,
-    //     playerId: data.playerId,
-    //     currentLevel: data.currentLevel,
-    //   });
-    // }
-    // ─────────────────────────────────────────────────────────
   // Pin(nail) 생성
   // ─────────────────────────────────────────────────────────
     @SubscribeMessage('drawPin')
@@ -431,7 +412,7 @@ import { join } from 'path';
         // 다른 클라이언트에게 브로드캐스트
         // client.broadcast.emit('push', payload);
         
-        if(payload.currentLevel === 19 && this.pushPermanentLock) {
+        if(payload.currentLevel === 12 && this.pushPermanentLock) {
           await this.logAction(payload.playerId, payload.force.x > 0 ? 'left_push_notworking' : 'right_push_notworking', payload.currentLevel);
           console.log(payload.playerId, payload.force.x > 0 ? 'left_push_notworking' : 'right_push_notworking')
           return ;
@@ -452,7 +433,7 @@ import { join } from 'path';
           this.currentTurn = payload.playerId === 'player1' ? 'player2' : 'player1'; // 현재 턴 업데이트
           this.server.emit('updateTurn', { currentTurn: this.currentTurn }); // 전체 클라이언트에 브로드캐스트
 
-          if(payload.currentLevel === 19 && !this.pushPermanentLock) {
+          if(payload.currentLevel === 12 && !this.pushPermanentLock) {
             this.pushPermanentLock = true;
           }
           return ;
