@@ -218,6 +218,7 @@ import { join } from 'path';
       groupNumber?: number;
     }) {
       console.log("payload:", JSON.stringify(payload));
+      
       await this.logAction(
         payload.playerId, 'drawShape', payload.currentLevel,
         payload.customId, payload.points,
@@ -354,6 +355,17 @@ import { join } from 'path';
         if(payload.category) {
           this.pool.release(payload.category);
         }
+    }
+
+    @SubscribeMessage('changeFulcrum')
+    async handleChangeFulcrum(client: Socket, payload: { playerId: string; level: number; fulcrumIndex: number }) {
+        console.log("payload: ", payload);
+      
+        // 브로드캐스트 (자기 자신 포함 모든 유저에게 알림)
+        this.server.emit('changeFulcrum', payload);
+
+        // 원한다면 서버 상태 업데이트, 로깅 등 추가
+        // await this.logAction(payload.playerId, 'changeFulcrum', payload.level, payload.fulcrumIndex);
     }
 
     @SubscribeMessage('resetLevel')
