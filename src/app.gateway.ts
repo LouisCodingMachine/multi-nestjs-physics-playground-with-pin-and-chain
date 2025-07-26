@@ -130,6 +130,8 @@ import { join } from 'path';
         { id: 'nails_id_string', title: 'nails_id_string' },
         { id: 'target_body_custom_id', title: 'target_body_custom_id' },
         { id: 'pins_id_string', title: 'pins_id_string' },
+        { id: 'posIndex', title: 'posIndex' },
+        { id: 'drawPos', title: 'drawPos' },
         { id: 'timestamp', title: 'timestamp' },
       ],
       append: true,
@@ -172,7 +174,7 @@ import { join } from 'path';
       client.broadcast.emit(event, payload);
     }
 
-    private async logAction(playerId: string, type: string, currentLevel: number, objectCustomId?: string, objectVector?: Matter.Vector[], tool?: string, direction?: string, newLevel?: number, groupNumber?: number, category?: number, nailsIdString?: string, targetBodyCustomId?: string, pinsIdString?: string) {
+    private async logAction(playerId: string, type: string, currentLevel: number, objectCustomId?: string, objectVector?: Matter.Vector[], tool?: string, direction?: string, newLevel?: number, groupNumber?: number, category?: number, nailsIdString?: string, targetBodyCustomId?: string, pinsIdString?: string, posIndex?: number, drawPos?: {x: number, y: number}, density?: number) {
       const timestamp = new Date().toISOString();
       
       // objectVector를 JSON 문자열로 변환
@@ -193,6 +195,8 @@ import { join } from 'path';
           nails_id_string: nailsIdString || '',
           target_body_custom_id: targetBodyCustomId || '',
           pins_id_string: pinsIdString || '',
+          posIndex: posIndex || '',
+          drawPos: drawPos || '',
           timestamp,
         },
       ]);
@@ -216,6 +220,9 @@ import { join } from 'path';
       nailsIdString?: string;
       collisionCategory?: number;
       groupNumber?: number;
+      centerX?: number;
+      centerY?: number;
+      density?: number;
     }) {
       console.log("payload:", JSON.stringify(payload));
       
@@ -223,8 +230,9 @@ import { join } from 'path';
         payload.playerId, 'drawShape', payload.currentLevel,
         payload.customId, payload.points,
         undefined, undefined, undefined,
-        payload.groupNumber, payload.collisionCategory, payload.nailsIdString);
-
+        payload.groupNumber, payload.collisionCategory, payload.nailsIdString, undefined, undefined, undefined, {x: payload.centerX, y: payload.centerY}, payload.density
+      );
+        
         if ([7, 8, 9, 10, 20].includes(payload.currentLevel)) {
           const prevId = this.lastRectangles.get(payload.currentLevel);
           if (prevId) {
@@ -302,7 +310,8 @@ import { join } from 'path';
         this.pool.getAvailableAsHexString()
       );
 
-      await this.logAction(data.playerId, 'drawPin', data.currentLevel, data.customId, data.points, undefined, undefined, undefined, groupNumber, collisionCategory, undefined, data.targetBodyCustomId);
+      
+      await this.logAction(data.playerId, 'drawPin', data.currentLevel, data.customId, data.points, undefined, undefined, undefined, groupNumber, collisionCategory, undefined, data.targetBodyCustomId, undefined, undefined, {x: data.centerX, y: data.centerY}, undefined);
 
       // 모든 클라이언트에 브로드캐스트
       this.server.emit('drawPin', {
@@ -340,12 +349,15 @@ import { join } from 'path';
     }
 
     @SubscribeMessage('changeHingePosition')
-      handleChangeHingePosition(
-        @MessageBody() data: { level: number; hingePosIndex: 0|1|2; playerId: string },
+    async handleChangeHingePosition(
+        @MessageBody() data: { level: number; hingePosIndex: 0|1|2; playerId: string, dir: string },
         @ConnectedSocket() client: Socket,
       ) {
         // 보낸 클라이언트를 제외한 모두에게 재전파
         client.broadcast.emit('changeHingePosition', data);
+
+        // 원한다면 서버 상태 업데이트, 로깅 등 추가
+        await this.logAction(data.playerId, 'changeHingePosition'+"_"+data.dir, data.level, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, data.hingePosIndex);
       }
 
 
@@ -358,14 +370,14 @@ import { join } from 'path';
     }
 
     @SubscribeMessage('changeFulcrum')
-    async handleChangeFulcrum(client: Socket, payload: { playerId: string; level: number; fulcrumIndex: number }) {
+    async handleChangeFulcrum(client: Socket, payload: { playerId: string; level: number; fulcrumIndex: number; dir: string }) {
         console.log("payload: ", payload);
       
         // 브로드캐스트 (자기 자신 포함 모든 유저에게 알림)
         this.server.emit('changeFulcrum', payload);
 
         // 원한다면 서버 상태 업데이트, 로깅 등 추가
-        // await this.logAction(payload.playerId, 'changeFulcrum', payload.level, payload.fulcrumIndex);
+        await this.logAction(payload.playerId, 'changeFulcrum'+"_"+payload.dir, payload.level, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, payload.fulcrumIndex);
     }
 
     @SubscribeMessage('resetLevel')
