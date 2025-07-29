@@ -132,6 +132,8 @@ import { join } from 'path';
         { id: 'pins_id_string', title: 'pins_id_string' },
         { id: 'posIndex', title: 'posIndex' },
         { id: 'drawPos', title: 'drawPos' },
+        { id: 'isOutOfTurnAction', title: 'isOutOfTurnAction' },
+        { id: 'isForbidden', title: 'isForbidden' },
         { id: 'timestamp', title: 'timestamp' },
       ],
       append: true,
@@ -174,8 +176,11 @@ import { join } from 'path';
       client.broadcast.emit(event, payload);
     }
 
-    private async logAction(playerId: string, type: string, currentLevel: number, objectCustomId?: string, objectVector?: Matter.Vector[], tool?: string, direction?: string, newLevel?: number, groupNumber?: number, category?: number, nailsIdString?: string, targetBodyCustomId?: string, pinsIdString?: string, posIndex?: number, drawPos?: {x: number, y: number}, density?: number) {
-      const timestamp = new Date().toISOString();
+    private async logAction(playerId: string, type: string, currentLevel: number, objectCustomId?: string, objectVector?: Matter.Vector[], tool?: string, direction?: string, newLevel?: number, groupNumber?: number, category?: number, nailsIdString?: string, targetBodyCustomId?: string, pinsIdString?: string, posIndex?: number, drawPos?: string, density?: number, isOutOfTurnAction?: boolean, isForbidden?: boolean) {
+      const now = new Date();
+      const kstOffset = 9 * 60 * 60 * 1000; // 한국은 UTC+9 이므로 9시간을 밀리초로 변환
+      const kstDate = new Date(now.getTime() + kstOffset);
+      const timestamp = kstDate.toISOString().slice(0, 19).replace('T', ' ');
       
       // objectVector를 JSON 문자열로 변환
       const objectVectorString = objectVector ? JSON.stringify(objectVector) : '';
@@ -197,6 +202,9 @@ import { join } from 'path';
           pins_id_string: pinsIdString || '',
           posIndex: posIndex || '',
           drawPos: drawPos || '',
+          density: density,
+          isOutOfTurnAction: isOutOfTurnAction,
+          isForbidden: isForbidden,
           timestamp,
         },
       ]);
@@ -211,6 +219,16 @@ import { join } from 'path';
       client.broadcast.emit('mouseMove', payload);
     }
 
+    // @SubscribeMessage('out-of-turn-actions')
+    // async handleOutOfTurnActions(client: Socket, payload: { playerId: string, outOfTurnaActionType: string, currentLevel: number, clickPos: {x: number, y: number}}) {
+    //   await this.logAction(
+    //     payload.playerId, 'out-of-turn-actions', payload.currentLevel,
+    //     undefined, undefined,
+    //     undefined, undefined, undefined,
+    //     undefined, undefined, undefined, undefined, undefined, undefined, payload.clickPos, undefined, payload.outOfTurnaActionType,
+    //   );
+    // }
+
     @SubscribeMessage('drawShape')
     async handleDrawShape(client: Socket, payload: {
       points: Matter.Vector[];
@@ -223,14 +241,26 @@ import { join } from 'path';
       centerX?: number;
       centerY?: number;
       density?: number;
+      isOutOfTurnAction?: boolean;
     }) {
       console.log("payload:", JSON.stringify(payload));
+      const drawPos = JSON.stringify({x: payload.centerX, y: payload.centerY});
+      console.log("drawPos: ", drawPos);
+      if(payload.isOutOfTurnAction) {
+        await this.logAction(
+          payload.playerId, 'drawShape', payload.currentLevel,
+          payload.customId, payload.points,
+          undefined, undefined, undefined,
+          payload.groupNumber, payload.collisionCategory, payload.nailsIdString, undefined, undefined, undefined, drawPos, payload.density, payload.isOutOfTurnAction, undefined
+        );
+        return;
+      } 
       
       await this.logAction(
         payload.playerId, 'drawShape', payload.currentLevel,
         payload.customId, payload.points,
         undefined, undefined, undefined,
-        payload.groupNumber, payload.collisionCategory, payload.nailsIdString, undefined, undefined, undefined, {x: payload.centerX, y: payload.centerY}, payload.density
+        payload.groupNumber, payload.collisionCategory, payload.nailsIdString, undefined, undefined, undefined, drawPos, payload.density
       );
         
         if ([7, 8, 9, 10, 20].includes(payload.currentLevel)) {
@@ -263,8 +293,22 @@ import { join } from 'path';
         targetBodyCustomId: string;
         nailGroupNumber?: number;
         nailCategory?: number;
+        isOutOfTurnAction?: boolean;
+        isRejectPin?: boolean;
       },
     ) {
+      const drawPos = JSON.stringify({x: data.centerX, y: data.centerY});
+      console.log("drawPos: ", drawPos);
+      if (data.isOutOfTurnAction) {
+        await this.logAction(data.playerId, 'drawPin', data.currentLevel, data.customId, data.points, undefined, undefined, undefined, undefined, undefined, undefined, data.targetBodyCustomId, undefined, undefined, drawPos, undefined, true, undefined);
+        return;
+      }
+
+      if (data.isRejectPin) {
+        await this.logAction(data.playerId, 'drawRejectPin', data.currentLevel, data.customId, data.points, undefined, undefined, undefined, undefined, undefined, undefined, data.targetBodyCustomId, undefined, undefined, drawPos, undefined, undefined, true);
+        return;
+      }
+
       // 카테고리 (풀 사용)
       let collisionCategory = data.nailCategory; // 만약 클라이언트에서 직접 주면 그걸 사용
       if (!collisionCategory) {
@@ -311,7 +355,7 @@ import { join } from 'path';
       );
 
       
-      await this.logAction(data.playerId, 'drawPin', data.currentLevel, data.customId, data.points, undefined, undefined, undefined, groupNumber, collisionCategory, undefined, data.targetBodyCustomId, undefined, undefined, {x: data.centerX, y: data.centerY}, undefined);
+      await this.logAction(data.playerId, 'drawPin', data.currentLevel, data.customId, data.points, undefined, undefined, undefined, groupNumber, collisionCategory, undefined, data.targetBodyCustomId, undefined, undefined, drawPos, undefined);
 
       // 모든 클라이언트에 브로드캐스트
       this.server.emit('drawPin', {
@@ -396,9 +440,14 @@ import { join } from 'path';
     }
 
     @SubscribeMessage('erase')
-    async handleErase(client: Socket, payload: { customId: string; playerId: string; currentLevel: number; isFall?: boolean }) {
+    async handleErase(client: Socket, payload: { customId: string; playerId: string; currentLevel: number; isFall?: boolean, isOutOfTurnAction?: boolean, isDisappear?: boolean }) {
         console.log("payload: ", payload)
         // client.broadcast.emit('erase', payload);
+
+        if (payload.isOutOfTurnAction) {
+          await this.logAction(payload.playerId, 'erase', payload.currentLevel, payload.customId, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, payload.isOutOfTurnAction, undefined);
+          return;
+        }
 
         // 1) nail Map에서 customId에 해당하는 nail 조회
         const nailData = this.nails.get(payload.customId);
@@ -424,6 +473,8 @@ import { join } from 'path';
 
         if (payload.isFall) {
           await this.logAction(payload.playerId, 'fall', payload.currentLevel, payload.customId);
+        } else if(payload.isDisappear) {
+          await this.logAction(payload.playerId, 'isDisappear', payload.currentLevel, payload.customId, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, true);
         } else {
           await this.logAction(payload.playerId, 'erase', payload.currentLevel, payload.customId);
         }
@@ -432,12 +483,21 @@ import { join } from 'path';
     }
 
     @SubscribeMessage('push')
-    async handlePush(client: Socket, payload: { force: { x: number; y: number }; playerId: string; currentLevel: number }) {
+    async handlePush(client: Socket, payload: { force: { x: number; y: number }; playerId: string; currentLevel: number, isOutOfTurnAction?: boolean, isForbidden?: boolean }) {
         // 다른 클라이언트에게 브로드캐스트
         // client.broadcast.emit('push', payload);
         
+        if(payload.isOutOfTurnAction) {
+          if(payload.currentLevel === 12 && this.pushPermanentLock) {
+            await this.logAction(payload.playerId, payload.force.x > 0 ? 'left_push' : 'right_push', payload.currentLevel, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, payload.isOutOfTurnAction, payload.isForbidden);  
+            return;
+          }
+          await this.logAction(payload.playerId, payload.force.x > 0 ? 'left_push' : 'right_push', payload.currentLevel, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, payload.isOutOfTurnAction, undefined);
+          return;
+        }
+
         if(payload.currentLevel === 12 && this.pushPermanentLock) {
-          await this.logAction(payload.playerId, payload.force.x > 0 ? 'left_push_notworking' : 'right_push_notworking', payload.currentLevel);
+          await this.logAction(payload.playerId, payload.force.x > 0 ? 'left_push_notworking' : 'right_push_notworking', payload.currentLevel, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, payload.isForbidden);
           console.log(payload.playerId, payload.force.x > 0 ? 'left_push_notworking' : 'right_push_notworking')
           return ;
         }
@@ -465,8 +525,24 @@ import { join } from 'path';
     }
     
     @SubscribeMessage('changeTool')
-    async handleChangeTool(client: Socket, payload: { tool: string; playerId: string; currentLevel: number }) {
+    async handleChangeTool(client: Socket, payload: { tool: string; playerId: string; currentLevel: number, isOutOfTurnAction?: boolean, isToolForbidden?: boolean }) {
+      console.log("changeTool")
         // 다른 클라이언트에게 tool 변경 정보 브로드캐스트
+        if (payload.isOutOfTurnAction) {
+          if(payload.isToolForbidden) {
+            await this.logAction(payload.playerId, 'changeTool', payload.currentLevel, undefined, undefined, payload.tool, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, payload.isOutOfTurnAction, payload.isToolForbidden);
+            return;
+          } else {
+            await this.logAction(payload.playerId, 'changeTool', payload.currentLevel, undefined, undefined, payload.tool, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, payload.isOutOfTurnAction);
+            return;
+          }
+        }
+
+        if (payload.isToolForbidden) {
+          await this.logAction(payload.playerId, 'changeTool', payload.currentLevel, undefined, undefined, payload.tool, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, payload.isToolForbidden);
+          return;
+        }
+
         await this.logAction(payload.playerId, 'changeTool', payload.currentLevel, undefined, undefined, payload.tool);
         client.broadcast.emit('changeTool', payload);
     }
